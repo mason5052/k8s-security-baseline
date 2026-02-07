@@ -1,0 +1,114 @@
+# RBAC Hardened Configuration Template
+# Based on CIS Kubernetes Benchmark v1.8.0
+#
+# Author: Mason Kim
+# Repository: https://github.com/mason5052/k8s-security-baseline
+#
+# This template provides secure RBAC configurations following
+# the principle of least privilege.
+
+---
+# Namespace for application workloads
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secure-app
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# Custom ServiceAccount (avoid using default)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-service-account
+  namespace: secure-app
+automountServiceAccountToken: false  # CIS 5.1.6
+
+---
+# Role with minimal required permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: app-role
+  namespace: secure-app
+rules:
+  # Read-only access to ConfigMaps
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  # Read-only access to Secrets (only specific secrets)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["app-config-secret"]
+    verbs: ["get"]
+
+---
+# RoleBinding - binds the role to the service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: app-role-binding
+  namespace: secure-app
+subjects:
+  - kind: ServiceAccount
+    name: app-service-account
+    namespace: secure-app
+roleRef:
+  kind: Role
+  name: app-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRole for read-only cluster access (use sparingly)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "namespaces", "pods"]
+    verbs: ["get", "list", "watch"]
+
+---
+# Deny default service account token mounting
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: secure-app
+automountServiceAccountToken: false
+
+---
+# Example secure Pod configuration
+apiVersion: v1
+kind: Pod
+metadata:
+  name: secure-app-pod
+  namespace: secure-app
+spec:
+  serviceAccountName: app-service-account
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: app
+      image: nginx:alpine
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        limits:
+          cpu: "500m"
+          memory: "256Mi"
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
