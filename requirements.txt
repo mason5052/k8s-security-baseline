@@ -1,0 +1,5 @@
+# k8s-security-baseline dependencies
+pyyaml>=6.0
+
+# Development / CI dependencies
+detect-secrets>=1.4.0
