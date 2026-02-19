@@ -50,13 +50,19 @@ check_prerequisites() {
         check_fail "kubectl not found in PATH"
         exit 1
     fi
-    
+
+    if ! command -v jq &> /dev/null; then
+        check_fail "jq not found in PATH (required for JSON parsing - install: apt-get install jq / brew install jq)"
+        exit 1
+    fi
+
     if ! kubectl cluster-info &> /dev/null; then
         check_fail "Cannot connect to Kubernetes cluster"
         exit 1
     fi
     
     check_pass "kubectl configured and cluster accessible"
+    check_pass "jq available for JSON processing"
 }
 
 # 1. Control Plane Security
