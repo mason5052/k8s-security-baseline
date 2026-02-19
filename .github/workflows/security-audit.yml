@@ -1,0 +1,163 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Run weekly on Monday at 08:00 UTC
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+jobs:
+  # ─── Job 1: Lint and validate YAML/shell files ───────────────────────────────
+  validate:
+    name: Validate Files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint shell scripts
+        run: |
+          sudo apt-get install -y shellcheck
+          shellcheck scripts/audit-cluster.sh
+
+      - name: Validate Python syntax
+        run: |
+          python3 -m py_compile scripts/generate-report.py
+          echo "Python syntax OK"
+
+      - name: Validate YAML templates
+        run: |
+          python3 -c "
+          import yaml, glob, sys
+          errors = []
+          for f in glob.glob('templates/**/*.yaml', recursive=True):
+              try:
+                  with open(f) as fh:
+                      list(yaml.safe_load_all(fh))
+                  print(f'OK: {f}')
+              except yaml.YAMLError as e:
+                  errors.append(f'FAIL: {f} - {e}')
+          if errors:
+              print('\n'.join(errors)); sys.exit(1)
+          "
+
+  # ─── Job 2: Container/image scanning with Trivy ──────────────────────────────
+  trivy-scan:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy on repo filesystem (IaC + secrets scan)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: misconfig,secret
+          severity: HIGH,CRITICAL
+          format: table
+          exit-code: '0'   # Report but don't fail; review findings manually
+
+      - name: Run Trivy SARIF output (for GitHub Security tab)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: misconfig,secret
+          format: sarif
+          output: trivy-results.sarif
+        continue-on-error: true
+
+      - name: Upload Trivy SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+        continue-on-error: true
+
+  # ─── Job 3: Generate demo audit report ───────────────────────────────────────
+  generate-report:
+    name: Generate Audit Report
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Generate HTML report (demo mode)
+        run: |
+          python3 scripts/generate-report.py \
+            --format html \
+            --output security-report.html \
+            --title "k8s-security-baseline Demo Report"
+          echo "Report generated:"
+          wc -l security-report.html
+
+      - name: Generate JSON report
+        run: |
+          python3 scripts/generate-report.py \
+            --format json \
+            --output security-report.json
+          echo "JSON report generated:"
+          cat security-report.json | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          s = d['summary']
+          print(f\"Grade: {s['grade']} | Pass: {s['pass']} | Fail: {s['fail']} | Warn: {s['warning']}\")
+          "
+
+      - name: Upload reports as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit-report
+          path: |
+            security-report.html
+            security-report.json
+          retention-days: 30
+
+  # ─── Job 4: Check for secrets in codebase ────────────────────────────────────
+  secret-detection:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # Full history for better detection
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true   # Report findings; review manually
+
+      - name: Detect hardcoded secrets with detect-secrets
+        run: |
+          pip install detect-secrets
+          detect-secrets scan --all-files \
+            --exclude-files '.*\.md$' \
+            --exclude-files '.*\.txt$' \
+            > .secrets.baseline 2>&1 || true
+          python3 -c "
+          import json
+          with open('.secrets.baseline') as f:
+              data = json.load(f)
+          results = data.get('results', {})
+          count = sum(len(v) for v in results.values())
+          if count > 0:
+              print(f'WARNING: {count} potential secret(s) detected - review .secrets.baseline')
+          else:
+              print('No secrets detected')
+          "
