@@ -187,6 +187,27 @@ Ready-to-apply NetworkPolicy manifests:
 
 ---
 
+## SOC 2 Trust Services Criteria Mapping
+
+This security baseline maps directly to SOC 2 Type II Trust Services Criteria, enabling organizations to use these controls as audit-ready evidence.
+
+| TSC | Criteria | Security Domain | Controls Covered |
+|-----|----------|-----------------|------------------|
+| CC6.1 | Logical Access | RBAC and Policies | Least-privilege roles, service account restrictions, namespace isolation |
+| CC6.6 | System Boundaries | Network Security | Default deny NetworkPolicy, namespace isolation, ingress TLS |
+| CC6.7 | Data Transmission | Network Security | mTLS, TLS termination, encrypted ingress/egress |
+| CC6.8 | Malicious Software | Pod Security | Container image scanning (Trivy), read-only root filesystem, non-root containers |
+| CC7.1 | Detection Mechanisms | Audit and Monitoring | Audit logging, CI/CD secret detection, vulnerability scanning |
+| CC7.2 | Anomaly Monitoring | Control Plane | API server audit logs, admission controllers, control plane hardening |
+| CC8.1 | Change Management | CI/CD Integration | GitHub Actions validation, automated security gates, IaC review |
+| A1.2 | Recovery Mechanisms | Secrets Management | etcd encryption at rest, secret rotation, backup procedures |
+| C1.1 | Confidential Data | Secrets Management | Encrypted secrets, RBAC access controls, External Secrets Operator |
+| P6.1 | Data Privacy | Network Security | Namespace isolation, egress controls, data boundary enforcement |
+
+Each checklist in this repository documents which CIS controls map to the corresponding SOC 2 criteria, enabling audit-ready evidence collection.
+
+---
+
 ## Author
 
 **Mason Kim** - DevSecOps Engineer
